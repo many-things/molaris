@@ -22,11 +22,16 @@ package bank
 
 import (
 	"context"
+	"cosmossdk.io/core/address"
+	errorsmod "cosmossdk.io/errors"
 	"math/big"
 
-	"cosmossdk.io/core/address"
-
+	"github.com/cosmos/cosmos-sdk/baseapp"
+	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	authztypes "github.com/cosmos/cosmos-sdk/x/authz"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	"pkg.berachain.dev/polaris/contracts/bindings/cosmos/lib"
@@ -43,13 +48,13 @@ type Contract struct {
 	ethprecompile.BaseContract
 
 	addressCodec address.Codec
-	msgServer    banktypes.MsgServer
+	msgRouter    baseapp.MessageRouter
 	querier      banktypes.QueryServer
 }
 
 // NewPrecompileContract returns a new instance of the bank precompile contract.
 func NewPrecompileContract(
-	ak cosmlib.CodecProvider, ms banktypes.MsgServer, qs banktypes.QueryServer,
+	ak cosmlib.CodecProvider, mr baseapp.MessageRouter, qs banktypes.QueryServer,
 ) *Contract {
 	return &Contract{
 		BaseContract: ethprecompile.NewBaseContract(
@@ -57,7 +62,7 @@ func NewPrecompileContract(
 			common.BytesToAddress(authtypes.NewModuleAddress(banktypes.ModuleName)),
 		),
 		addressCodec: ak.AddressCodec(),
-		msgServer:    ms,
+		msgRouter:    mr,
 		querier:      qs,
 	}
 }
@@ -84,10 +89,12 @@ func (c *Contract) GetBalance(
 		return nil, err
 	}
 
-	res, err := c.querier.Balance(ctx, &banktypes.QueryBalanceRequest{
-		Address: accAddr,
-		Denom:   denom,
-	})
+	res, err := c.querier.Balance(
+		ctx, &banktypes.QueryBalanceRequest{
+			Address: accAddr,
+			Denom:   denom,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +113,11 @@ func (c *Contract) GetAllBalances(
 		return nil, err
 	}
 
-	res, err := c.querier.AllBalances(ctx, &banktypes.QueryAllBalancesRequest{
-		Address: accAddr,
-	})
+	res, err := c.querier.AllBalances(
+		ctx, &banktypes.QueryAllBalancesRequest{
+			Address: accAddr,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -127,10 +136,12 @@ func (c *Contract) GetSpendableBalance(
 		return nil, err
 	}
 
-	res, err := c.querier.SpendableBalanceByDenom(ctx, &banktypes.QuerySpendableBalanceByDenomRequest{
-		Address: accAddr,
-		Denom:   denom,
-	})
+	res, err := c.querier.SpendableBalanceByDenom(
+		ctx, &banktypes.QuerySpendableBalanceByDenomRequest{
+			Address: accAddr,
+			Denom:   denom,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +160,11 @@ func (c *Contract) GetAllSpendableBalances(
 		return nil, err
 	}
 
-	res, err := c.querier.SpendableBalances(ctx, &banktypes.QuerySpendableBalancesRequest{
-		Address: accAddr,
-	})
+	res, err := c.querier.SpendableBalances(
+		ctx, &banktypes.QuerySpendableBalancesRequest{
+			Address: accAddr,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -164,9 +177,11 @@ func (c *Contract) GetSupply(
 	ctx context.Context,
 	denom string,
 ) (*big.Int, error) {
-	res, err := c.querier.SupplyOf(ctx, &banktypes.QuerySupplyOfRequest{
-		Denom: denom,
-	})
+	res, err := c.querier.SupplyOf(
+		ctx, &banktypes.QuerySupplyOfRequest{
+			Denom: denom,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -193,9 +208,11 @@ func (c *Contract) GetDenomMetadata(
 	ctx context.Context,
 	denom string,
 ) (bankgenerated.IBankModuleDenomMetadata, error) {
-	res, err := c.querier.DenomMetadata(ctx, &banktypes.QueryDenomMetadataRequest{
-		Denom: denom,
-	})
+	res, err := c.querier.DenomMetadata(
+		ctx, &banktypes.QueryDenomMetadataRequest{
+			Denom: denom,
+		},
+	)
 	if err != nil {
 		return bankgenerated.IBankModuleDenomMetadata{}, err
 	}
@@ -225,9 +242,11 @@ func (c *Contract) GetSendEnabled(
 	ctx context.Context,
 	denom string,
 ) (bool, error) {
-	res, err := c.querier.SendEnabled(ctx, &banktypes.QuerySendEnabledRequest{
-		Denoms: []string{denom},
-	})
+	res, err := c.querier.SendEnabled(
+		ctx, &banktypes.QuerySendEnabledRequest{
+			Denoms: []string{denom},
+		},
+	)
 	if err != nil {
 		return false, err
 	}
@@ -238,9 +257,10 @@ func (c *Contract) GetSendEnabled(
 	return res.SendEnabled[0].Enabled, nil
 }
 
-// Send implements `send(address,(uint256,string)[])` method.
+// Send implements `send(address,address,(uint256,string)[])` method.
 func (c *Contract) Send(
 	ctx context.Context,
+	fromAddress common.Address,
 	toAddress common.Address,
 	coins any,
 ) (bool, error) {
@@ -254,16 +274,41 @@ func (c *Contract) Send(
 	if err != nil {
 		return false, err
 	}
+	fromAddr, err := cosmlib.StringFromEthAddress(c.addressCodec, fromAddress)
+	if err != nil {
+		return false, err
+	}
 	toAddr, err := cosmlib.StringFromEthAddress(c.addressCodec, toAddress)
 	if err != nil {
 		return false, err
 	}
 
-	_, err = c.msgServer.Send(ctx, &banktypes.MsgSend{
-		FromAddress: caller,
+	var msg sdk.Msg = &banktypes.MsgSend{
+		FromAddress: fromAddr,
 		ToAddress:   toAddr,
 		Amount:      amount,
-	})
+	}
+	if caller != fromAddr {
+		inner, err := cdctypes.NewAnyWithValue(msg)
+		if err != nil {
+			return false, err
+		}
+
+		msg = &authztypes.MsgExec{
+			Grantee: caller,
+			Msgs:    []*cdctypes.Any{inner},
+		}
+	}
+
+	handler := c.msgRouter.Handler(msg)
+	if handler == nil {
+		return false, sdkerrors.ErrUnknownRequest.Wrapf("unrecognized message route: %s", sdk.MsgTypeURL(msg))
+	}
+
+	if _, err := handler(sdk.UnwrapSDKContext(ctx), msg); err != nil {
+		return false, errorsmod.Wrapf(err, "failed to execute message; message %v", msg)
+	}
+
 	return err == nil, err
 }
 
