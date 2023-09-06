@@ -110,17 +110,17 @@ interface IBankModule {
      */
     function getSendEnabled(string calldata denom) external view returns (bool);
 
+    /**
+     * @dev Get allowance of msg.sender to spender.
+     */
+    function allowance(address spender, string calldata denom) external payable returns (uint256);
+
     ////////////////////////////////////// WRITE METHODS //////////////////////////////////////////
 
     /**
      * @dev Send coins from msg.sender to another.
      */
     function send(address fromAddress, address toAddress, Cosmos.Coin[] calldata amount) external payable returns (bool);
-
-    /**
-     * @dev Get allowance of msg.sender to spender.
-     */
-    function allowance(address spender, string calldata denom) external payable returns (uint256);
 
     /**
      * @dev Set allowance of msg.sender to spender.
