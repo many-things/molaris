@@ -112,15 +112,15 @@ interface IBankModule {
 
     ////////////////////////////////////// WRITE METHODS //////////////////////////////////////////
 
-//    /**
-//     * @dev Send coins from msg.sender to another.
-//     */
-//    function send(address toAddress, Cosmos.Coin[] calldata amount) external payable returns (bool);
-
     /**
      * @dev Send coins from msg.sender to another.
      */
     function send(address fromAddress, address toAddress, Cosmos.Coin[] calldata amount) external payable returns (bool);
+
+    /**
+     * @dev Set allowance of msg.sender to spender.
+     */
+    function approve(address spender, Cosmos.Coin[] calldata amount) external payable returns (bool);
 
     //////////////////////////////////////////// UTILS ////////////////////////////////////////////
 

@@ -312,6 +312,50 @@ func (c *Contract) Send(
 	return err == nil, err
 }
 
+// Approve implements `approve(address,(uint256,string)[])` method.
+func (c *Contract) Approve(ctx context.Context, spenderAddress common.Address, coins any) (bool, error) {
+	amount, err := cosmlib.ExtractCoinsFromInput(coins)
+	if err != nil {
+		return false, err
+	}
+	caller, err := cosmlib.StringFromEthAddress(
+		c.addressCodec, vm.UnwrapPolarContext(ctx).MsgSender(),
+	)
+	if err != nil {
+		return false, err
+	}
+	spender, err := cosmlib.StringFromEthAddress(c.addressCodec, spenderAddress)
+	if err != nil {
+		return false, err
+	}
+
+	msg := &authztypes.MsgGrant{
+		Granter: caller,
+		Grantee: spender,
+		Grant:   authztypes.Grant{Expiration: nil},
+	}
+
+	if err := msg.SetAuthorization(
+		&banktypes.SendAuthorization{
+			SpendLimit: amount,
+			AllowList:  []string{spender},
+		},
+	); err != nil {
+		return false, err
+	}
+
+	handler := c.msgRouter.Handler(msg)
+	if handler == nil {
+		return false, sdkerrors.ErrUnknownRequest.Wrapf("unrecognized message route: %s", sdk.MsgTypeURL(msg))
+	}
+
+	if _, err := handler(sdk.UnwrapSDKContext(ctx), msg); err != nil {
+		return false, errorsmod.Wrapf(err, "failed to execute message; message %v", msg)
+	}
+
+	return err == nil, err
+}
+
 // ConvertAccAddressFromString converts a Cosmos string representing a account address to a
 // common.Address.
 func (c *Contract) ConvertAccAddressFromString(attributeValue string) (any, error) {
