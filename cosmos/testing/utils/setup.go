@@ -59,6 +59,7 @@ import (
 
 var (
 	AccKey     = storetypes.NewKVStoreKey("acc")
+	AuthzKey   = storetypes.NewKVStoreKey("authz")
 	BankKey    = storetypes.NewKVStoreKey("bank")
 	EvmKey     = storetypes.NewKVStoreKey("evm")
 	StakingKey = storetypes.NewKVStoreKey("staking")

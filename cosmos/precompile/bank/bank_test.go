@@ -23,6 +23,10 @@ package bank_test
 import (
 	"context"
 	"fmt"
+	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/runtime"
+	authztypes "github.com/cosmos/cosmos-sdk/x/authz"
+	authzkeeper "github.com/cosmos/cosmos-sdk/x/authz/keeper"
 	"math/big"
 	"testing"
 
@@ -33,7 +37,6 @@ import (
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-
 	generated "pkg.berachain.dev/polaris/contracts/bindings/cosmos/precompile/bank"
 	"pkg.berachain.dev/polaris/cosmos/precompile"
 	"pkg.berachain.dev/polaris/cosmos/precompile/bank"
@@ -60,6 +63,7 @@ var _ = Describe("Bank Precompile Test", func() {
 		contract *bank.Contract
 		addr     sdk.AccAddress
 		factory  *log.Factory
+		msr      *baseapp.MsgServiceRouter
 		ak       authkeeper.AccountKeeperI
 		bk       bankkeeper.BaseKeeper
 		ctx      context.Context
@@ -68,10 +72,19 @@ var _ = Describe("Bank Precompile Test", func() {
 	BeforeEach(func() {
 		ctx, ak, bk, _ = testutils.SetupMinimalKeepers()
 
-		contract = utils.MustGetAs[*bank.Contract](bank.NewPrecompileContract(
-			ak, bankkeeper.NewMsgServerImpl(bk), bk),
-		)
-		addr = sdk.AccAddress([]byte("bank"))
+		encCfg := testutils.GetEncodingConfig()
+
+		// Create the base app msgRouter.
+		msr = baseapp.NewMsgServiceRouter()
+		akz := authzkeeper.NewKeeper(runtime.NewKVStoreService(testutils.AuthzKey), encCfg.Codec, msr, ak)
+
+		// Register the msg Service Handlers.
+		msr.SetInterfaceRegistry(testutils.GetEncodingConfig().InterfaceRegistry)
+		banktypes.RegisterMsgServer(msr, bankkeeper.NewMsgServerImpl(bk))
+		authztypes.RegisterMsgServer(msr, akz)
+
+		contract = utils.MustGetAs[*bank.Contract](bank.NewPrecompileContract(ak, msr, bk))
+		addr = sdk.AccAddress("bank")
 
 		// Register the events.
 		factory = log.NewFactory([]ethprecompile.Registrable{contract})
@@ -480,6 +493,7 @@ var _ = Describe("Bank Precompile Test", func() {
 
 				_, err = contract.Send(
 					pCtx,
+					common.BytesToAddress(fromAcc),
 					common.BytesToAddress(toAcc),
 					testutil.SdkCoinsToEvmCoins(sortedSdkCoins),
 				)
@@ -512,6 +526,7 @@ var _ = Describe("Bank Precompile Test", func() {
 				bk.SetSendEnabled(ctx, denom, true)
 				_, err = contract.Send(
 					ctx,
+					common.BytesToAddress(fromAcc),
 					common.BytesToAddress(toAcc),
 					testutil.SdkCoinsToEvmCoins(coinsToSend),
 				)
