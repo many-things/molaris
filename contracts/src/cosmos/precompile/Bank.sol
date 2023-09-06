@@ -111,9 +111,9 @@ interface IBankModule {
     function getSendEnabled(string calldata denom) external view returns (bool);
 
     /**
-     * @dev Get allowance of msg.sender to spender.
+     * @dev Get allowance of owner to spender.
      */
-    function allowance(address spender, string calldata denom) external payable returns (uint256);
+    function allowance(address owner, address spender, string calldata denom) external view returns (uint256);
 
     ////////////////////////////////////// WRITE METHODS //////////////////////////////////////////
 
