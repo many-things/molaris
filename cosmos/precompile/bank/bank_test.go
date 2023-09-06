@@ -23,17 +23,19 @@ package bank_test
 import (
 	"context"
 	"fmt"
+	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/runtime"
+	authztypes "github.com/cosmos/cosmos-sdk/x/authz"
+	authzkeeper "github.com/cosmos/cosmos-sdk/x/authz/keeper"
 	"math/big"
 	"testing"
 
 	sdkmath "cosmossdk.io/math"
-
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-
 	generated "pkg.berachain.dev/polaris/contracts/bindings/cosmos/precompile/bank"
 	"pkg.berachain.dev/polaris/cosmos/precompile"
 	"pkg.berachain.dev/polaris/cosmos/precompile/bank"
@@ -60,7 +62,9 @@ var _ = Describe("Bank Precompile Test", func() {
 		contract *bank.Contract
 		addr     sdk.AccAddress
 		factory  *log.Factory
+		msr      *baseapp.MsgServiceRouter
 		ak       authkeeper.AccountKeeperI
+		azk      authzkeeper.Keeper
 		bk       bankkeeper.BaseKeeper
 		ctx      context.Context
 	)
@@ -68,10 +72,19 @@ var _ = Describe("Bank Precompile Test", func() {
 	BeforeEach(func() {
 		ctx, ak, bk, _ = testutils.SetupMinimalKeepers()
 
-		contract = utils.MustGetAs[*bank.Contract](bank.NewPrecompileContract(
-			ak, bankkeeper.NewMsgServerImpl(bk), bk),
+		// Create the base app msgRouter.
+		msr = baseapp.NewMsgServiceRouter()
+		azk = authzkeeper.NewKeeper(
+			runtime.NewKVStoreService(testutils.AuthzKey), testutils.GetEncodingConfig().Codec, msr, ak,
 		)
-		addr = sdk.AccAddress([]byte("bank"))
+
+		// Register the msg Service Handlers.
+		msr.SetInterfaceRegistry(testutils.GetEncodingConfig().InterfaceRegistry)
+		banktypes.RegisterMsgServer(msr, bankkeeper.NewMsgServerImpl(bk))
+		authztypes.RegisterMsgServer(msr, azk)
+
+		contract = utils.MustGetAs[*bank.Contract](bank.NewPrecompileContract(ak, msr, bk))
+		addr = sdk.AccAddress("bank")
 
 		// Register the events.
 		factory = log.NewFactory([]ethprecompile.Registrable{contract})
@@ -447,7 +460,6 @@ var _ = Describe("Bank Precompile Test", func() {
 
 		When("Send", func() {
 			It("should succeed", func() {
-
 				balanceAmount, ok := new(big.Int).SetString("220000000000000000", 10)
 				Expect(ok).To(BeTrue())
 
@@ -480,6 +492,7 @@ var _ = Describe("Bank Precompile Test", func() {
 
 				_, err = contract.Send(
 					pCtx,
+					common.BytesToAddress(fromAcc),
 					common.BytesToAddress(toAcc),
 					testutil.SdkCoinsToEvmCoins(sortedSdkCoins),
 				)
@@ -490,6 +503,98 @@ var _ = Describe("Bank Precompile Test", func() {
 
 				Expect(balances.Balances).To(Equal(sortedSdkCoins))
 			})
+
+			It(
+				"should succeed (caller != from_address)", func() {
+					balanceAmount, ok := new(big.Int).SetString("22000000000000000000", 10)
+					Expect(ok).To(BeTrue())
+
+					accs := simtestutil.CreateRandomAccounts(3)
+					caller, fromAcc, toAcc := accs[0], accs[1], accs[2]
+
+					pCtx := vm.NewPolarContext(ctx, nil, common.BytesToAddress(caller), new(big.Int))
+
+					sortedSdkCoins := sdk.NewCoins(
+						sdk.NewCoin(
+							denom,
+							sdkmath.NewIntFromBigInt(balanceAmount),
+						),
+						sdk.NewCoin(
+							denom2,
+							sdkmath.NewIntFromBigInt(balanceAmount),
+						),
+					)
+
+					err := FundAccount(
+						sdk.UnwrapSDKContext(ctx),
+						bk,
+						fromAcc,
+						sortedSdkCoins,
+					)
+					Expect(err).ToNot(HaveOccurred())
+
+					err = ApproveAccount(sdk.UnwrapSDKContext(ctx), azk, fromAcc, caller, sortedSdkCoins)
+					Expect(err).ToNot(HaveOccurred())
+
+					bk.SetSendEnabled(ctx, denom, true)
+					bk.SetSendEnabled(ctx, denom2, true)
+
+					_, err = contract.Send(
+						pCtx,
+						common.BytesToAddress(fromAcc),
+						common.BytesToAddress(toAcc),
+						testutil.SdkCoinsToEvmCoins(sortedSdkCoins),
+					)
+					Expect(err).ToNot(HaveOccurred())
+
+					balances, err := bk.AllBalances(ctx, banktypes.NewQueryAllBalancesRequest(toAcc, nil, false))
+					Expect(err).ToNot(HaveOccurred())
+
+					Expect(balances.Balances).To(Equal(sortedSdkCoins))
+				},
+			)
+
+			It(
+				"should error when lack of allowance", func() {
+					balanceAmount, ok := new(big.Int).SetString("22000000000000000000", 10)
+					Expect(ok).To(BeTrue())
+
+					accs := simtestutil.CreateRandomAccounts(3)
+					caller, fromAcc, toAcc := accs[0], accs[1], accs[2]
+
+					pCtx := vm.NewPolarContext(ctx, nil, common.BytesToAddress(caller), new(big.Int))
+
+					sortedSdkCoins := sdk.NewCoins(
+						sdk.NewCoin(
+							denom,
+							sdkmath.NewIntFromBigInt(balanceAmount),
+						),
+						sdk.NewCoin(
+							denom2,
+							sdkmath.NewIntFromBigInt(balanceAmount),
+						),
+					)
+
+					err := FundAccount(
+						sdk.UnwrapSDKContext(ctx),
+						bk,
+						fromAcc,
+						sortedSdkCoins,
+					)
+					Expect(err).ToNot(HaveOccurred())
+
+					bk.SetSendEnabled(ctx, denom, true)
+					bk.SetSendEnabled(ctx, denom2, true)
+
+					_, err = contract.Send(
+						pCtx,
+						common.BytesToAddress(fromAcc),
+						common.BytesToAddress(toAcc),
+						testutil.SdkCoinsToEvmCoins(sortedSdkCoins),
+					)
+					Expect(err).To(HaveOccurred())
+				},
+			)
 
 			It("should error when sending 0 coins", func() {
 				balanceAmount, ok := new(big.Int).SetString("22000000000000000000", 10)
@@ -512,6 +617,7 @@ var _ = Describe("Bank Precompile Test", func() {
 				bk.SetSendEnabled(ctx, denom, true)
 				_, err = contract.Send(
 					ctx,
+					common.BytesToAddress(fromAcc),
 					common.BytesToAddress(toAcc),
 					testutil.SdkCoinsToEvmCoins(coinsToSend),
 				)
@@ -526,6 +632,26 @@ func FundAccount(ctx sdk.Context, bk bankkeeper.BaseKeeper, account sdk.AccAddre
 		return err
 	}
 	return bk.SendCoinsFromModuleToAccount(ctx, evmtypes.ModuleName, account, coins)
+}
+
+func ApproveAccount(
+	ctx sdk.Context, azk authzkeeper.Keeper, granter sdk.AccAddress, grantee sdk.AccAddress, coins sdk.Coins,
+) error {
+	msg := &authztypes.MsgGrant{
+		Granter: granter.String(),
+		Grantee: grantee.String(),
+		Grant:   authztypes.Grant{Expiration: nil},
+	}
+
+	if err := msg.SetAuthorization(banktypes.NewSendAuthorization(coins, []sdk.AccAddress{grantee})); err != nil {
+		return err
+	}
+
+	if _, err := azk.Grant(ctx, msg); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func getTestMetadata() []banktypes.Metadata {

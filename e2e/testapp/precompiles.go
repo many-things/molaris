@@ -21,7 +21,6 @@
 package testapp
 
 import (
-	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 
@@ -37,25 +36,27 @@ import (
 func PrecompilesToInject(app *SimApp, customPcs ...ethprecompile.Registrable) func() *ethprecompile.Injector {
 	return func() *ethprecompile.Injector {
 		// Create the precompile injector with the standard precompiles.
-		pcs := ethprecompile.NewPrecompiles([]ethprecompile.Registrable{
-			bankprecompile.NewPrecompileContract(
-				app.AccountKeeper,
-				bankkeeper.NewMsgServerImpl(app.BankKeeper),
-				app.BankKeeper,
-			),
-			distrprecompile.NewPrecompileContract(
-				app.AccountKeeper,
-				app.StakingKeeper,
-				distrkeeper.NewMsgServerImpl(app.DistrKeeper),
-				distrkeeper.NewQuerier(app.DistrKeeper),
-			),
-			govprecompile.NewPrecompileContract(
-				app.AccountKeeper,
-				govkeeper.NewMsgServerImpl(app.GovKeeper),
-				govkeeper.NewQueryServer(app.GovKeeper),
-			),
-			stakingprecompile.NewPrecompileContract(app.AccountKeeper, app.StakingKeeper),
-		}...)
+		pcs := ethprecompile.NewPrecompiles(
+			[]ethprecompile.Registrable{
+				bankprecompile.NewPrecompileContract(
+					app.AccountKeeper,
+					app.App.MsgServiceRouter(),
+					app.BankKeeper,
+				),
+				distrprecompile.NewPrecompileContract(
+					app.AccountKeeper,
+					app.StakingKeeper,
+					distrkeeper.NewMsgServerImpl(app.DistrKeeper),
+					distrkeeper.NewQuerier(app.DistrKeeper),
+				),
+				govprecompile.NewPrecompileContract(
+					app.AccountKeeper,
+					govkeeper.NewMsgServerImpl(app.GovKeeper),
+					govkeeper.NewQueryServer(app.GovKeeper),
+				),
+				stakingprecompile.NewPrecompileContract(app.AccountKeeper, app.StakingKeeper),
+			}...,
+		)
 
 		// Add the custom precompiles to the injector.
 		for _, pc := range customPcs {
