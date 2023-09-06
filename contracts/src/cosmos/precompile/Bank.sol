@@ -118,6 +118,11 @@ interface IBankModule {
     function send(address fromAddress, address toAddress, Cosmos.Coin[] calldata amount) external payable returns (bool);
 
     /**
+     * @dev Get allowance of msg.sender to spender.
+     */
+    function allowance(address spender, string calldata denom) external payable returns (uint256);
+
+    /**
      * @dev Set allowance of msg.sender to spender.
      */
     function approve(address spender, Cosmos.Coin[] calldata amount) external payable returns (bool);
