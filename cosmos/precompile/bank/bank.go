@@ -22,9 +22,11 @@ package bank
 
 import (
 	"context"
+	"math/big"
+	"time"
+
 	"cosmossdk.io/core/address"
 	errorsmod "cosmossdk.io/errors"
-	"math/big"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -50,11 +52,12 @@ type Contract struct {
 	addressCodec address.Codec
 	msgRouter    baseapp.MessageRouter
 	querier      banktypes.QueryServer
+	authzQuerier authztypes.QueryServer
 }
 
 // NewPrecompileContract returns a new instance of the bank precompile contract.
 func NewPrecompileContract(
-	ak cosmlib.CodecProvider, mr baseapp.MessageRouter, qs banktypes.QueryServer,
+	ak cosmlib.CodecProvider, mr baseapp.MessageRouter, qs banktypes.QueryServer, authzQs authztypes.QueryServer,
 ) *Contract {
 	return &Contract{
 		BaseContract: ethprecompile.NewBaseContract(
@@ -64,6 +67,7 @@ func NewPrecompileContract(
 		addressCodec: ak.AddressCodec(),
 		msgRouter:    mr,
 		querier:      qs,
+		authzQuerier: authzQs,
 	}
 }
 
@@ -312,6 +316,61 @@ func (c *Contract) Send(
 	return err == nil, err
 }
 
+// Allowance implements `allowance(address,string)` method.
+func (c *Contract) Allowance(ctx context.Context, spenderAddress common.Address, denom string) (*big.Int, error) {
+	caller, err := cosmlib.StringFromEthAddress(
+		c.addressCodec, vm.UnwrapPolarContext(ctx).MsgSender(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	spender, err := cosmlib.StringFromEthAddress(c.addressCodec, spenderAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := c.authzQuerier.Grants(
+		ctx, &authztypes.QueryGrantsRequest{
+			Granter:    caller,
+			Grantee:    spender,
+			MsgTypeUrl: banktypes.SendAuthorization{}.MsgTypeURL(),
+			Pagination: nil,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map the grants to send authorizations, should have the same type since we filtered by msg
+	// type url.
+	blocktime := time.Unix(int64(vm.UnwrapPolarContext(ctx).Block().Time), 0)
+	sendAuths, err := cosmlib.GetGrantAsSendAuth(res.Grants, blocktime)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the highest allowance from the send authorizations.
+	allowance := getHighestAllowance(sendAuths, denom)
+
+	return allowance, nil
+}
+
+// getHighestAllowance returns the highest allowance for a given coin denom.
+func getHighestAllowance(sendAuths []*banktypes.SendAuthorization, coinDenom string) *big.Int {
+	// Init the max to 0.
+	var max = big.NewInt(0)
+	// Loop through the send authorizations and find the highest allowance.
+	for _, sendAuth := range sendAuths {
+		// Get the spendable limit for the coin denom that was specified.
+		amount := sendAuth.SpendLimit.AmountOf(coinDenom)
+		// If not set, the current is the max, if set, compare the current with the max.
+		if max == nil || amount.BigInt().Cmp(max) > 0 {
+			max = amount.BigInt()
+		}
+	}
+	return max
+}
+
 // Approve implements `approve(address,(uint256,string)[])` method.
 func (c *Contract) Approve(ctx context.Context, spenderAddress common.Address, coins any) (bool, error) {
 	amount, err := cosmlib.ExtractCoinsFromInput(coins)
@@ -335,7 +394,7 @@ func (c *Contract) Approve(ctx context.Context, spenderAddress common.Address, c
 		Grant:   authztypes.Grant{Expiration: nil},
 	}
 
-	if err := msg.SetAuthorization(
+	if err = msg.SetAuthorization(
 		&banktypes.SendAuthorization{
 			SpendLimit: amount,
 			AllowList:  []string{spender},
@@ -349,7 +408,7 @@ func (c *Contract) Approve(ctx context.Context, spenderAddress common.Address, c
 		return false, sdkerrors.ErrUnknownRequest.Wrapf("unrecognized message route: %s", sdk.MsgTypeURL(msg))
 	}
 
-	if _, err := handler(sdk.UnwrapSDKContext(ctx), msg); err != nil {
+	if _, err = handler(sdk.UnwrapSDKContext(ctx), msg); err != nil {
 		return false, errorsmod.Wrapf(err, "failed to execute message; message %v", msg)
 	}
 
