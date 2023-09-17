@@ -42,7 +42,6 @@ func PrecompilesToInject(app *SimApp, customPcs ...ethprecompile.Registrable) fu
 					app.AccountKeeper,
 					app.App.MsgServiceRouter(),
 					app.BankKeeper,
-					app.AuthzKeeper,
 				),
 				distrprecompile.NewPrecompileContract(
 					app.AccountKeeper,
