@@ -317,8 +317,10 @@ func (c *Contract) Send(
 }
 
 // Allowance implements `allowance(address,string)` method.
-func (c *Contract) Allowance(ctx context.Context, ownerAddress common.Address, spenderAddress common.Address, denom string) (*big.Int, error) {
-	owner, err := cosmlib.StringFromEthAddress(c.addressCodec, ownerAddress)
+func (c *Contract) Allowance(ctx context.Context, spenderAddress common.Address, denom string) (*big.Int, error) {
+	caller, err := cosmlib.StringFromEthAddress(
+		c.addressCodec, vm.UnwrapPolarContext(ctx).MsgSender(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +331,7 @@ func (c *Contract) Allowance(ctx context.Context, ownerAddress common.Address, s
 
 	res, err := c.authzQuerier.Grants(
 		ctx, &authztypes.QueryGrantsRequest{
-			Granter:    owner,
+			Granter:    caller,
 			Grantee:    spender,
 			MsgTypeUrl: banktypes.SendAuthorization{}.MsgTypeURL(),
 			Pagination: nil,
