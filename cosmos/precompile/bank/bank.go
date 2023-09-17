@@ -23,17 +23,10 @@ package bank
 import (
 	"context"
 	"math/big"
-	"time"
 
 	"cosmossdk.io/core/address"
-	errorsmod "cosmossdk.io/errors"
 
-	"github.com/cosmos/cosmos-sdk/baseapp"
-	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	authztypes "github.com/cosmos/cosmos-sdk/x/authz"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	"pkg.berachain.dev/polaris/contracts/bindings/cosmos/lib"
@@ -50,14 +43,13 @@ type Contract struct {
 	ethprecompile.BaseContract
 
 	addressCodec address.Codec
-	msgRouter    baseapp.MessageRouter
+	msgServer    banktypes.MsgServer
 	querier      banktypes.QueryServer
-	authzQuerier authztypes.QueryServer
 }
 
 // NewPrecompileContract returns a new instance of the bank precompile contract.
 func NewPrecompileContract(
-	ak cosmlib.CodecProvider, mr baseapp.MessageRouter, qs banktypes.QueryServer, authzQs authztypes.QueryServer,
+	ak cosmlib.CodecProvider, ms banktypes.MsgServer, qs banktypes.QueryServer,
 ) *Contract {
 	return &Contract{
 		BaseContract: ethprecompile.NewBaseContract(
@@ -65,9 +57,8 @@ func NewPrecompileContract(
 			common.BytesToAddress(authtypes.NewModuleAddress(banktypes.ModuleName)),
 		),
 		addressCodec: ak.AddressCodec(),
-		msgRouter:    mr,
+		msgServer:    ms,
 		querier:      qs,
-		authzQuerier: authzQs,
 	}
 }
 
@@ -93,12 +84,10 @@ func (c *Contract) GetBalance(
 		return nil, err
 	}
 
-	res, err := c.querier.Balance(
-		ctx, &banktypes.QueryBalanceRequest{
-			Address: accAddr,
-			Denom:   denom,
-		},
-	)
+	res, err := c.querier.Balance(ctx, &banktypes.QueryBalanceRequest{
+		Address: accAddr,
+		Denom:   denom,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -117,11 +106,9 @@ func (c *Contract) GetAllBalances(
 		return nil, err
 	}
 
-	res, err := c.querier.AllBalances(
-		ctx, &banktypes.QueryAllBalancesRequest{
-			Address: accAddr,
-		},
-	)
+	res, err := c.querier.AllBalances(ctx, &banktypes.QueryAllBalancesRequest{
+		Address: accAddr,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -140,12 +127,10 @@ func (c *Contract) GetSpendableBalance(
 		return nil, err
 	}
 
-	res, err := c.querier.SpendableBalanceByDenom(
-		ctx, &banktypes.QuerySpendableBalanceByDenomRequest{
-			Address: accAddr,
-			Denom:   denom,
-		},
-	)
+	res, err := c.querier.SpendableBalanceByDenom(ctx, &banktypes.QuerySpendableBalanceByDenomRequest{
+		Address: accAddr,
+		Denom:   denom,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -164,11 +149,9 @@ func (c *Contract) GetAllSpendableBalances(
 		return nil, err
 	}
 
-	res, err := c.querier.SpendableBalances(
-		ctx, &banktypes.QuerySpendableBalancesRequest{
-			Address: accAddr,
-		},
-	)
+	res, err := c.querier.SpendableBalances(ctx, &banktypes.QuerySpendableBalancesRequest{
+		Address: accAddr,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -181,11 +164,9 @@ func (c *Contract) GetSupply(
 	ctx context.Context,
 	denom string,
 ) (*big.Int, error) {
-	res, err := c.querier.SupplyOf(
-		ctx, &banktypes.QuerySupplyOfRequest{
-			Denom: denom,
-		},
-	)
+	res, err := c.querier.SupplyOf(ctx, &banktypes.QuerySupplyOfRequest{
+		Denom: denom,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -212,11 +193,9 @@ func (c *Contract) GetDenomMetadata(
 	ctx context.Context,
 	denom string,
 ) (bankgenerated.IBankModuleDenomMetadata, error) {
-	res, err := c.querier.DenomMetadata(
-		ctx, &banktypes.QueryDenomMetadataRequest{
-			Denom: denom,
-		},
-	)
+	res, err := c.querier.DenomMetadata(ctx, &banktypes.QueryDenomMetadataRequest{
+		Denom: denom,
+	})
 	if err != nil {
 		return bankgenerated.IBankModuleDenomMetadata{}, err
 	}
@@ -246,11 +225,9 @@ func (c *Contract) GetSendEnabled(
 	ctx context.Context,
 	denom string,
 ) (bool, error) {
-	res, err := c.querier.SendEnabled(
-		ctx, &banktypes.QuerySendEnabledRequest{
-			Denoms: []string{denom},
-		},
-	)
+	res, err := c.querier.SendEnabled(ctx, &banktypes.QuerySendEnabledRequest{
+		Denoms: []string{denom},
+	})
 	if err != nil {
 		return false, err
 	}
@@ -261,10 +238,9 @@ func (c *Contract) GetSendEnabled(
 	return res.SendEnabled[0].Enabled, nil
 }
 
-// Send implements `send(address,address,(uint256,string)[])` method.
+// Send implements `send(address,(uint256,string)[])` method.
 func (c *Contract) Send(
 	ctx context.Context,
-	fromAddress common.Address,
 	toAddress common.Address,
 	coins any,
 ) (bool, error) {
@@ -278,140 +254,16 @@ func (c *Contract) Send(
 	if err != nil {
 		return false, err
 	}
-	fromAddr, err := cosmlib.StringFromEthAddress(c.addressCodec, fromAddress)
-	if err != nil {
-		return false, err
-	}
 	toAddr, err := cosmlib.StringFromEthAddress(c.addressCodec, toAddress)
 	if err != nil {
 		return false, err
 	}
 
-	var msg sdk.Msg = &banktypes.MsgSend{
-		FromAddress: fromAddr,
+	_, err = c.msgServer.Send(ctx, &banktypes.MsgSend{
+		FromAddress: caller,
 		ToAddress:   toAddr,
 		Amount:      amount,
-	}
-	if caller != fromAddr {
-		inner, err := cdctypes.NewAnyWithValue(msg)
-		if err != nil {
-			return false, err
-		}
-
-		msg = &authztypes.MsgExec{
-			Grantee: caller,
-			Msgs:    []*cdctypes.Any{inner},
-		}
-	}
-
-	handler := c.msgRouter.Handler(msg)
-	if handler == nil {
-		return false, sdkerrors.ErrUnknownRequest.Wrapf("unrecognized message route: %s", sdk.MsgTypeURL(msg))
-	}
-
-	if _, err := handler(sdk.UnwrapSDKContext(ctx), msg); err != nil {
-		return false, errorsmod.Wrapf(err, "failed to execute message; message %v", msg)
-	}
-
-	return err == nil, err
-}
-
-// Allowance implements `allowance(address,string)` method.
-func (c *Contract) Allowance(ctx context.Context, spenderAddress common.Address, denom string) (*big.Int, error) {
-	caller, err := cosmlib.StringFromEthAddress(
-		c.addressCodec, vm.UnwrapPolarContext(ctx).MsgSender(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	spender, err := cosmlib.StringFromEthAddress(c.addressCodec, spenderAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := c.authzQuerier.Grants(
-		ctx, &authztypes.QueryGrantsRequest{
-			Granter:    caller,
-			Grantee:    spender,
-			MsgTypeUrl: banktypes.SendAuthorization{}.MsgTypeURL(),
-			Pagination: nil,
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Map the grants to send authorizations, should have the same type since we filtered by msg
-	// type url.
-	blocktime := time.Unix(int64(vm.UnwrapPolarContext(ctx).Block().Time), 0)
-	sendAuths, err := cosmlib.GetGrantAsSendAuth(res.Grants, blocktime)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the highest allowance from the send authorizations.
-	allowance := getHighestAllowance(sendAuths, denom)
-
-	return allowance, nil
-}
-
-// getHighestAllowance returns the highest allowance for a given coin denom.
-func getHighestAllowance(sendAuths []*banktypes.SendAuthorization, coinDenom string) *big.Int {
-	// Init the max to 0.
-	var max = big.NewInt(0)
-	// Loop through the send authorizations and find the highest allowance.
-	for _, sendAuth := range sendAuths {
-		// Get the spendable limit for the coin denom that was specified.
-		amount := sendAuth.SpendLimit.AmountOf(coinDenom)
-		// If not set, the current is the max, if set, compare the current with the max.
-		if max == nil || amount.BigInt().Cmp(max) > 0 {
-			max = amount.BigInt()
-		}
-	}
-	return max
-}
-
-// Approve implements `approve(address,(uint256,string)[])` method.
-func (c *Contract) Approve(ctx context.Context, spenderAddress common.Address, coins any) (bool, error) {
-	amount, err := cosmlib.ExtractCoinsFromInput(coins)
-	if err != nil {
-		return false, err
-	}
-	caller, err := cosmlib.StringFromEthAddress(
-		c.addressCodec, vm.UnwrapPolarContext(ctx).MsgSender(),
-	)
-	if err != nil {
-		return false, err
-	}
-	spender, err := cosmlib.StringFromEthAddress(c.addressCodec, spenderAddress)
-	if err != nil {
-		return false, err
-	}
-
-	msg := &authztypes.MsgGrant{
-		Granter: caller,
-		Grantee: spender,
-		Grant:   authztypes.Grant{Expiration: nil},
-	}
-
-	if err = msg.SetAuthorization(
-		&banktypes.SendAuthorization{
-			SpendLimit: amount,
-			AllowList:  []string{spender},
-		},
-	); err != nil {
-		return false, err
-	}
-
-	handler := c.msgRouter.Handler(msg)
-	if handler == nil {
-		return false, sdkerrors.ErrUnknownRequest.Wrapf("unrecognized message route: %s", sdk.MsgTypeURL(msg))
-	}
-
-	if _, err = handler(sdk.UnwrapSDKContext(ctx), msg); err != nil {
-		return false, errorsmod.Wrapf(err, "failed to execute message; message %v", msg)
-	}
-
+	})
 	return err == nil, err
 }
 

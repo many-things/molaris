@@ -22,15 +22,12 @@ package lib
 
 import (
 	"math/big"
-	"time"
 
 	"cosmossdk.io/core/address"
 	sdkmath "cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
-	"github.com/cosmos/cosmos-sdk/x/authz"
-	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -137,24 +134,6 @@ func ExtractCoinFromInputToCoin(coin any) (sdk.Coin, error) {
 
 	sdkCoin := sdk.NewCoin(amounts.Denom, sdkmath.NewIntFromBigInt(amounts.Amount))
 	return sdkCoin, nil
-}
-
-// GetGrantAsSendAuth maps a list of grants to a list of send authorizations.
-func GetGrantAsSendAuth(
-	grants []*authz.Grant, blocktime time.Time,
-) ([]*banktypes.SendAuthorization, error) {
-	var sendAuths []*banktypes.SendAuthorization
-	for _, grant := range grants {
-		// Check that the expiration is still valid.
-		if grant.Expiration == nil || grant.Expiration.After(blocktime) {
-			sendAuth, ok := utils.GetAs[*banktypes.SendAuthorization](grant.Authorization.GetCachedValue())
-			if !ok {
-				return nil, precompile.ErrInvalidGrantType
-			}
-			sendAuths = append(sendAuths, sendAuth)
-		}
-	}
-	return sendAuths, nil
 }
 
 // SdkUDEToStakingUDE converts a Cosmos SDK Unbonding Delegation Entry list to a geth compatible
