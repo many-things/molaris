@@ -87,4 +87,7 @@ type Plugin interface {
 	// ForEachStorage iterates over the storage of an account and calls the given callback
 	// function.
 	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool) error
+
+	// CommitToBank commits pending changes to bank module.
+	CommitToBank()
 }

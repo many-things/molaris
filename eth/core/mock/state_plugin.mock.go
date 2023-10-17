@@ -28,6 +28,9 @@ var _ core.StatePlugin = &StatePluginMock{}
 //			CloneFunc: func() state.Plugin {
 //				panic("mock out the Clone method")
 //			},
+//			CommitToBankFunc: func()  {
+//				panic("mock out the CommitToBank method")
+//			},
 //			CreateAccountFunc: func(address common.Address)  {
 //				panic("mock out the CreateAccount method")
 //			},
@@ -119,6 +122,9 @@ type StatePluginMock struct {
 	// CloneFunc mocks the Clone method.
 	CloneFunc func() state.Plugin
 
+	// CommitToBankFunc mocks the CommitToBank method.
+	CommitToBankFunc func()
+
 	// CreateAccountFunc mocks the CreateAccount method.
 	CreateAccountFunc func(address common.Address)
 
@@ -208,6 +214,9 @@ type StatePluginMock struct {
 		}
 		// Clone holds details about calls to the Clone method.
 		Clone []struct {
+		}
+		// CommitToBank holds details about calls to the CommitToBank method.
+		CommitToBank []struct {
 		}
 		// CreateAccount holds details about calls to the CreateAccount method.
 		CreateAccount []struct {
@@ -352,6 +361,7 @@ type StatePluginMock struct {
 	}
 	lockAddBalance         sync.RWMutex
 	lockClone              sync.RWMutex
+	lockCommitToBank       sync.RWMutex
 	lockCreateAccount      sync.RWMutex
 	lockDeleteAccounts     sync.RWMutex
 	lockEmpty              sync.RWMutex
@@ -440,6 +450,33 @@ func (mock *StatePluginMock) CloneCalls() []struct {
 	mock.lockClone.RLock()
 	calls = mock.calls.Clone
 	mock.lockClone.RUnlock()
+	return calls
+}
+
+// CommitToBank calls CommitToBankFunc.
+func (mock *StatePluginMock) CommitToBank() {
+	if mock.CommitToBankFunc == nil {
+		panic("StatePluginMock.CommitToBankFunc: method is nil but StatePlugin.CommitToBank was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockCommitToBank.Lock()
+	mock.calls.CommitToBank = append(mock.calls.CommitToBank, callInfo)
+	mock.lockCommitToBank.Unlock()
+	mock.CommitToBankFunc()
+}
+
+// CommitToBankCalls gets all the calls that were made to CommitToBank.
+// Check the length with:
+//
+//	len(mockedStatePlugin.CommitToBankCalls())
+func (mock *StatePluginMock) CommitToBankCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockCommitToBank.RLock()
+	calls = mock.calls.CommitToBank
+	mock.lockCommitToBank.RUnlock()
 	return calls
 }
 

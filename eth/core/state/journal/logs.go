@@ -128,7 +128,9 @@ func (l *logs) RevertToSnapshot(id int) {
 // Finalize clears the journal of the tx logs.
 //
 // Finalize implements `libtypes.Controllable`.
-func (l *logs) Finalize() {}
+func (l *logs) Finalize() {
+	// TODO(thai): should be fixed
+}
 
 // Clone implements `libtypes.Cloneable`.
 func (l *logs) Clone() Log {

@@ -21,8 +21,8 @@
 package types
 
 const (
-	CodeKeyPrefix byte = iota
-	BalanceKeyPrefix
+	CodeKeyPrefix    byte = iota
+	BalanceKeyPrefix      // NOTE: should be not used
 	StorageKeyPrefix
 	CodeHashKeyPrefix
 	BlockHashKeyToNumPrefix
