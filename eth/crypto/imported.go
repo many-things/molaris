@@ -44,6 +44,7 @@ var (
 	PubkeyToAddress         = crypto.PubkeyToAddress
 	SignatureLength         = crypto.SignatureLength
 	ToECDSA                 = crypto.ToECDSA
+	ToECDSAUnsafe           = crypto.ToECDSAUnsafe
 	VerifySignature         = crypto.VerifySignature
 	FromECDSAPub            = crypto.FromECDSAPub
 )
