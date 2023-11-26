@@ -149,6 +149,7 @@ func GetAsEthTx(tx sdk.Tx) *coretypes.Transaction {
 	if !ok {
 		return nil
 	}
+	etr.GetSigners()
 	return etr.AsTransaction()
 }
 

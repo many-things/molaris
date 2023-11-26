@@ -22,10 +22,9 @@ package state
 
 import (
 	"math/big"
+	"pkg.berachain.dev/polaris/eth/core"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-
-	"github.com/ethereum/go-ethereum/core"
 
 	"pkg.berachain.dev/polaris/eth/common"
 )
@@ -33,6 +32,8 @@ import (
 // InitGenesis takes in a pointer to a genesis state object and populates the KV store.
 func (p *plugin) InitGenesis(ctx sdk.Context, ethGen *core.Genesis) {
 	p.Reset(ctx)
+
+	p.CreateAccount(core.ReservedAddress)
 
 	// Iterate over the genesis accounts and set the balances.
 	for address, account := range ethGen.Alloc {
