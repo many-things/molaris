@@ -136,10 +136,39 @@ func (sp *StateProcessor) Prepare(evm *vm.GethEVM, header *types.Header) {
 	sp.evm = evm
 }
 
+func checkTxSender(tx *types.Transaction, signer types.Signer, isReservedSender bool) error {
+	sender, err := types.Sender(signer, tx)
+	if err != nil {
+		return errorslib.Wrapf(err, "could not get tx sender [%s]", tx.Hash().Hex())
+	}
+
+	if isReservedSender {
+		if sender != ReservedAddress {
+			return errorslib.Wrapf(err, "tx sender should be reserved address [%s]", tx.Hash().Hex())
+		}
+	} else {
+		if sender == ReservedAddress {
+			return errorslib.Wrapf(err, "tx sender should not be reserved address [%s]", tx.Hash().Hex())
+		}
+	}
+
+	return nil
+}
+
 // ProcessTransaction applies a transaction to the current state of the blockchain.
 func (sp *StateProcessor) ProcessTransaction(
-	_ context.Context, tx *types.Transaction,
+	_ context.Context, tx *types.Transaction, isReservedSender bool,
 ) (*ExecutionResult, error) {
+	if err := checkTxSender(tx, sp.signer, isReservedSender); err != nil {
+		return nil, err
+	}
+
+	if isReservedSender {
+		old := sp.evm.Config.NoBaseFee
+		sp.evm.Config.NoBaseFee = true
+		defer func() { sp.evm.Config.NoBaseFee = old }()
+	}
+
 	// We set the gasPool = gasLimit - gasUsed.
 	gasPool := new(GasPool).AddGas(sp.header.GasLimit - sp.gp.BlockGasConsumed())
 

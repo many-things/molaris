@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"pkg.berachain.dev/polaris/cosmos/x/evm/plugins/state/bank"
 	"sync"
 
 	storetypes "cosmossdk.io/store/types"
@@ -58,8 +59,6 @@ type Plugin interface {
 	core.StatePlugin
 	// SetQueryContextFn sets the query context func for the plugin.
 	SetQueryContextFn(fn func(height int64, prove bool) (sdk.Context, error))
-	// IterateBalances iterates over the balances of all accounts and calls the given callback function.
-	IterateBalances(fn func(common.Address, *big.Int) bool)
 	// IterateState iterates over the state of all accounts and calls the given callback function.
 	IterateState(fn func(addr common.Address, key common.Hash, value common.Hash) bool)
 	// SetGasConfig sets the gas config for the plugin.
@@ -106,6 +105,9 @@ type plugin struct {
 	// keepers used for balance and account information.
 	ak AccountKeeper
 
+	bk BankKeeper
+	bm *bank.Manager
+
 	// getQueryContext allows for querying state a historical height.
 	getQueryContext func(height int64, prove bool) (sdk.Context, error)
 
@@ -119,14 +121,27 @@ type plugin struct {
 // NewPlugin returns a plugin with the given context and keepers.
 func NewPlugin(
 	ak AccountKeeper,
+	bk BankKeeper,
 	storeKey storetypes.StoreKey,
 	plf events.PrecompileLogFactory,
 ) Plugin {
 	return &plugin{
 		storeKey: storeKey,
 		ak:       ak,
+		bk:       bk,
 		plf:      plf,
 		mu:       sync.Mutex{},
+	}
+}
+
+// CommitToBank commits pending changes to bank module.
+func (p *plugin) CommitToBank() {
+	if p.bm != nil {
+		err := p.bm.Commit(p.ctx)
+		if err != nil {
+			p.ctx.Logger().Error("failed to commit pending changes to bank module", "err", err)
+			p.savedErr = err
+		}
 	}
 }
 
@@ -167,10 +182,13 @@ func (p *plugin) Reset(ctx context.Context) {
 	// in the EVM are not being charged additional gas unknowingly.
 	p.SetGasConfig(storetypes.GasConfig{}, storetypes.GasConfig{})
 
+	p.bm = bank.NewManager(p.bk)
+
 	// We setup a snapshot controller to properly revert the Controllable MultiStore and EventManager.
 	p.Controller = snapshot.NewController[string, libtypes.Controllable[string]]()
 	_ = p.Controller.Register(p.cms)
 	_ = p.Controller.Register(cem)
+	_ = p.Controller.Register(p.bm)
 
 	// We reset the saved error, so that we can check for errors in the next state transition.
 	p.savedErr = nil
@@ -255,12 +273,14 @@ func (p *plugin) DeleteAccounts(accounts []common.Address) {
 
 // GetBalance implements `StatePlugin` interface.
 func (p *plugin) GetBalance(addr common.Address) *big.Int {
-	return new(big.Int).SetBytes(p.ctx.KVStore(p.storeKey).Get(BalanceKeyFor(addr)))
+	return p.bm.GetBalance(p.ctx, addr)
+	//return new(big.Int).SetBytes(p.ctx.KVStore(p.storeKey).Get(BalanceKeyFor(addr)))
 }
 
 // SetBalance implements `StatePlugin` interface.
 func (p *plugin) SetBalance(addr common.Address, amount *big.Int) {
-	p.ctx.KVStore(p.storeKey).Set(BalanceKeyFor(addr), amount.Bytes())
+	//p.ctx.KVStore(p.storeKey).Set(BalanceKeyFor(addr), amount.Bytes())
+	p.bm.SetBalance(p.ctx, addr, amount)
 }
 
 // AddBalance implements the `StatePlugin` interface by adding the given amount
@@ -360,6 +380,27 @@ func (p *plugin) SetCode(addr common.Address, code []byte) {
 		ethStore.Delete(CodeKeyFor(codeHash))
 	} else {
 		ethStore.Set(CodeKeyFor(codeHash), code)
+	}
+}
+
+// IterateCode iterates over all the contract code, and calls the given function.
+func (p *plugin) IterateCode(fn func(addr common.Address, value common.Hash) bool) {
+	it := storetypes.KVStorePrefixIterator(
+		p.cms.GetKVStore(p.storeKey),
+		[]byte{types.CodeHashKeyPrefix},
+	)
+	defer func() {
+		if err := it.Close(); err != nil {
+			p.savedErr = err
+		}
+	}()
+
+	for ; it.Valid(); it.Next() {
+		k := it.Key()
+		addr := AddressFromCodeHashKey(k)
+		if fn(addr, p.GetCodeHash(addr)) {
+			break
+		}
 	}
 }
 
@@ -471,25 +512,6 @@ func getStateFromStore(
 	return common.Hash{}
 }
 
-func (p *plugin) IterateBalances(fn func(common.Address, *big.Int) bool) {
-	it := storetypes.KVStorePrefixIterator(
-		p.cms.GetKVStore(p.storeKey),
-		[]byte{types.BalanceKeyPrefix},
-	)
-	defer func() {
-		if err := it.Close(); err != nil {
-			p.savedErr = err
-		}
-	}()
-
-	for ; it.Valid(); it.Next() {
-		addr := AddressFromBalanceKey(it.Key())
-		if fn(addr, p.GetBalance(addr)) {
-			break
-		}
-	}
-}
-
 // =============================================================================
 // Historical State
 // =============================================================================
@@ -513,6 +535,7 @@ func (p *plugin) StateAtBlockNumber(number uint64) (core.StatePlugin, error) {
 	// Investigate and hopefully remove this GTE.
 	if int64Number >= p.ctx.BlockHeight() {
 		ctx, _ = p.ctx.CacheContext()
+		// TODO(thai): consider about cloning the bank manager
 	} else {
 		// Get the query context at the given height.
 		var err error
@@ -523,7 +546,7 @@ func (p *plugin) StateAtBlockNumber(number uint64) (core.StatePlugin, error) {
 	}
 
 	// Create a State Plugin with the requested chain height.
-	sp := NewPlugin(p.ak, p.storeKey, p.plf)
+	sp := NewPlugin(p.ak, p.bk, p.storeKey, p.plf)
 	sp.Reset(ctx)
 	return sp, nil
 }
@@ -534,8 +557,9 @@ func (p *plugin) StateAtBlockNumber(number uint64) (core.StatePlugin, error) {
 
 // Clone implements libtypes.Cloneable.
 func (p *plugin) Clone() ethstate.Plugin {
-	sp := NewPlugin(p.ak, p.storeKey, p.plf)
+	sp := NewPlugin(p.ak, p.bk, p.storeKey, p.plf)
 	cacheCtx, _ := p.ctx.CacheContext()
+	// TODO(thai): consider about cloning the bank manager
 	sp.Reset(cacheCtx)
 	return sp
 }

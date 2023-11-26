@@ -22,10 +22,9 @@ package state
 
 import (
 	"math/big"
+	"pkg.berachain.dev/polaris/eth/core"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-
-	"github.com/ethereum/go-ethereum/core"
 
 	"pkg.berachain.dev/polaris/eth/common"
 )
@@ -34,12 +33,17 @@ import (
 func (p *plugin) InitGenesis(ctx sdk.Context, ethGen *core.Genesis) {
 	p.Reset(ctx)
 
+	p.CreateAccount(core.ReservedAddress)
+
 	// Iterate over the genesis accounts and set the balances.
 	for address, account := range ethGen.Alloc {
 		// TODO: technically wrong since its overriding / hacking the auth keeper and
 		// we are using the nonce from the account keeper as well.
 		p.CreateAccount(address)
-		p.SetBalance(address, account.Balance)
+
+		// TODO(thai): we should rethink about this since we are using bank module for balances.
+		// p.SetBalance(address, account.Balance)
+
 		if account.Code != nil {
 			p.SetCode(address, account.Code)
 		}
@@ -47,6 +51,9 @@ func (p *plugin) InitGenesis(ctx sdk.Context, ethGen *core.Genesis) {
 			for k, v := range account.Storage {
 				p.SetState(address, k, v)
 			}
+		}
+		if account.Nonce != 0 {
+			p.SetNonce(address, account.Nonce)
 		}
 	}
 	p.Finalize()
@@ -57,20 +64,22 @@ func (p *plugin) ExportGenesis(ctx sdk.Context, ethGen *core.Genesis) {
 	p.Reset(ctx)
 	ethGen.Alloc = make(core.GenesisAlloc)
 
-	// Iterate Balances and set the genesis accounts.
-	p.IterateBalances(func(address common.Address, balance *big.Int) bool {
-		account, ok := ethGen.Alloc[address]
-		if !ok {
-			account = core.GenesisAccount{}
-		}
-		account.Code = p.GetCode(address)
-		if account.Code != nil {
-			account.Storage = make(map[common.Hash]common.Hash)
-		}
-		account.Balance = p.GetBalance(address)
-		ethGen.Alloc[address] = account
-		return false
-	})
+	// NOTE: we use bank module for balances, so we don't need to iterate balances to set the genesis accounts.
+	//// Iterate Balances and set the genesis accounts.
+	//p.IterateBalances(func(address common.Address, balance *big.Int) bool {
+	//	account, ok := ethGen.Alloc[address]
+	//	if !ok {
+	//		account = core.GenesisAccount{}
+	//	}
+	//	account.Code = p.GetCode(address)
+	//	if account.Code != nil {
+	//		account.Storage = make(map[common.Hash]common.Hash)
+	//	}
+	//	account.Balance = p.GetBalance(address)
+	//	account.Nonce = p.GetNonce(address)
+	//	ethGen.Alloc[address] = account
+	//	return false
+	//})
 
 	// Iterate Storage and set the genesis accounts.
 	p.IterateState(func(address common.Address, key common.Hash, value common.Hash) bool {
@@ -85,6 +94,23 @@ func (p *plugin) ExportGenesis(ctx sdk.Context, ethGen *core.Genesis) {
 
 		account.Code = p.GetCode(address)
 		account.Balance = p.GetBalance(address)
+		account.Nonce = p.GetNonce(address)
+		ethGen.Alloc[address] = account
+
+		return false
+	})
+
+	// Iterate Code and set the genesis accounts.
+	p.IterateCode(func(address common.Address, codeHash common.Hash) bool {
+		account, ok := ethGen.Alloc[address]
+		if !ok {
+			account = core.GenesisAccount{}
+		}
+		account.Code = p.GetCode(address)
+		account.Nonce = p.GetNonce(address)
+		if account.Balance == nil {
+			account.Balance = big.NewInt(0)
+		}
 		ethGen.Alloc[address] = account
 
 		return false

@@ -34,8 +34,8 @@ func (pl *Polaris) Prepare(ctx context.Context, number uint64) {
 }
 
 // ProcessTransaction processes the given transaction and returns the receipt.
-func (pl *Polaris) ProcessTransaction(ctx context.Context, tx *types.Transaction) (*core.ExecutionResult, error) {
-	return pl.blockchain.ProcessTransaction(ctx, tx)
+func (pl *Polaris) ProcessTransaction(ctx context.Context, tx *types.Transaction, isReservedSender bool) (*core.ExecutionResult, error) {
+	return pl.blockchain.ProcessTransaction(ctx, tx, isReservedSender)
 }
 
 // Finalize finalizes the current block.

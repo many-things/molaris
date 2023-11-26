@@ -22,15 +22,32 @@ package keeper
 
 import (
 	"context"
-
 	sdk "github.com/cosmos/cosmos-sdk/types"
-
+	"math/big"
 	"pkg.berachain.dev/polaris/eth/core"
 	coretypes "pkg.berachain.dev/polaris/eth/core/types"
 )
 
+func (k *Keeper) ProcessRawTransactionWithReservedAccount(ctx context.Context, rawTx *coretypes.LegacyTx) (*core.ExecutionResult, error) {
+	rawTx.Nonce = k.host.GetTxPoolPlugin().Nonce(core.ReservedAddress)
+	rawTx.GasPrice = new(big.Int)
+
+	signer := coretypes.LatestSignerForChainID(k.host.GetConfigurationPlugin().ChainConfig().ChainID)
+
+	tx, err := coretypes.SignTx(coretypes.NewTx(rawTx), signer, core.ReservedPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return k.processTransaction(ctx, tx, true)
+}
+
 // ProcessTransaction is called during the DeliverTx processing of the ABCI lifecycle.
 func (k *Keeper) ProcessTransaction(ctx context.Context, tx *coretypes.Transaction) (*core.ExecutionResult, error) {
+	return k.processTransaction(ctx, tx, false)
+}
+
+func (k *Keeper) processTransaction(ctx context.Context, tx *coretypes.Transaction, isReservedSender bool) (*core.ExecutionResult, error) {
 	sCtx := sdk.UnwrapSDKContext(ctx)
 	// We zero-out the gas meter prior to evm execution in order to ensure that the receipt output
 	// from the EVM is correct. In the future, we will revisit this to allow gas metering for more
@@ -39,7 +56,7 @@ func (k *Keeper) ProcessTransaction(ctx context.Context, tx *coretypes.Transacti
 		"reset gas meter prior to ethereum state transition")
 
 	// Process the transaction and return the EVM's execution result.
-	execResult, err := k.polaris.ProcessTransaction(ctx, tx)
+	execResult, err := k.polaris.ProcessTransaction(ctx, tx, isReservedSender)
 	if err != nil {
 		return nil, err
 	}

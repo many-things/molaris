@@ -22,6 +22,9 @@ package mempool
 
 import (
 	"context"
+	"errors"
+	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
+	"pkg.berachain.dev/polaris/eth/core"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -31,10 +34,34 @@ import (
 	errorslib "pkg.berachain.dev/polaris/lib/errors"
 )
 
+func checkTxSigner(tx sdk.Tx) error {
+	sigTx, ok := tx.(authsigning.SigVerifiableTx)
+	if !ok {
+		return errors.New("invalid transaction type")
+	}
+	signers, err := sigTx.GetSigners()
+	if err != nil {
+		return errorslib.Wrap(err, "failed to get signers")
+	}
+
+	for _, signer := range signers {
+		isReservedAccount := common.BytesToAddress(signer) == core.ReservedAddress
+		if isReservedAccount {
+			return errors.New("reserved account not allowed to send tx via mempool")
+		}
+	}
+
+	return nil
+}
+
 // Insert is called when a transaction is added to the mempool.
 func (etp *EthTxPool) Insert(ctx context.Context, tx sdk.Tx) error {
 	etp.mu.Lock()
 	defer etp.mu.Unlock()
+
+	if err := checkTxSigner(tx); err != nil {
+		return err
+	}
 
 	// Call the base mempool's Insert method
 	if err := etp.PriorityNonceMempool.Insert(ctx, tx); err != nil {

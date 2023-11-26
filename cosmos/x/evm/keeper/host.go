@@ -53,6 +53,7 @@ type Host interface {
 		storetypes.StoreKey,
 		storetypes.StoreKey,
 		state.AccountKeeper,
+		state.BankKeeper,
 		func(height int64, prove bool) (sdk.Context, error),
 	)
 }
@@ -96,10 +97,11 @@ func (h *host) Setup(
 	storeKey storetypes.StoreKey,
 	_ storetypes.StoreKey,
 	ak state.AccountKeeper,
+	bk state.BankKeeper,
 	qc func(height int64, prove bool) (sdk.Context, error),
 ) {
 	// Setup the state, precompile, historical, and txpool plugins
-	h.sp = state.NewPlugin(ak, storeKey, log.NewFactory(h.pcs().GetPrecompiles()))
+	h.sp = state.NewPlugin(ak, bk, storeKey, log.NewFactory(h.pcs().GetPrecompiles()))
 	h.pp = precompile.NewPlugin(h.pcs().GetPrecompiles(), h.sp)
 	// TODO: re-enable historical plugin using ABCI listener.
 	h.hp = historical.NewPlugin(h.cp, h.bp, nil, storeKey)

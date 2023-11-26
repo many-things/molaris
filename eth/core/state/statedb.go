@@ -21,6 +21,8 @@
 package state
 
 import (
+	"fmt"
+
 	"pkg.berachain.dev/polaris/eth/common"
 	"pkg.berachain.dev/polaris/eth/core/state/journal"
 	coretypes "pkg.berachain.dev/polaris/eth/core/types"
@@ -100,12 +102,23 @@ func (sdb *stateDB) RevertToSnapshot(id int) {
 // Finalise deletes the suicided accounts and finalizes all plugins, preparing the statedb for the
 // next transaction.
 func (sdb *stateDB) Finalise(bool) {
+	// NOTE: CommitToBank must be called at first. if not, bank state changes may be not applied.
+	sdb.CommitToBank()
+
 	sdb.DeleteAccounts(sdb.GetSuicides())
 	sdb.ctrl.Finalize()
 }
 
-func (sdb *stateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
+func (sdb *stateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	sdb.Finalise(deleteEmptyObjects)
+	return common.Hash{}
+}
+
+func (sdb *stateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
+	if err := sdb.Error(); err != nil {
+		return common.Hash{}, fmt.Errorf("commit aborted due to earlier error: %w", err)
+	}
+	sdb.IntermediateRoot(deleteEmptyObjects)
 	return common.Hash{}, nil
 }
 
@@ -140,6 +153,8 @@ func (sdb *stateDB) Prepare(rules params.Rules, sender, coinbase common.Address,
 			sdb.AddAddressToAccessList(coinbase)
 		}
 	}
+	// Reset TransientStorage for the new transaction
+	sdb.TransientStorage = journal.NewTransientStorage()
 }
 
 // =============================================================================
@@ -201,10 +216,6 @@ func (sdb *stateDB) Database() Database {
 func (sdb *stateDB) StartPrefetcher(_ string) {}
 
 func (sdb *stateDB) StopPrefetcher() {}
-
-func (sdb *stateDB) IntermediateRoot(_ bool) common.Hash {
-	return common.Hash{}
-}
 
 func (sdb *stateDB) StorageTrie(_ common.Address) (Trie, error) {
 	return nil, nil

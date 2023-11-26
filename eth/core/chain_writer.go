@@ -22,9 +22,9 @@ package core
 
 import (
 	"context"
+	"github.com/ethereum/go-ethereum/consensus/misc"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/vm"
 
 	"pkg.berachain.dev/polaris/eth/core/types"
@@ -37,7 +37,7 @@ type ChainWriter interface {
 	Prepare(context.Context, uint64)
 	// ProcessTransaction processes the given transaction and returns the receipt after applying
 	// the state transition. This method is called for each tx in the block.
-	ProcessTransaction(context.Context, *types.Transaction) (*ExecutionResult, error)
+	ProcessTransaction(context.Context, *types.Transaction, bool) (*ExecutionResult, error)
 	// Finalize is called after the last tx in the block.
 	Finalize(context.Context) error
 	// SendTx sends the given transaction to the tx pool.
@@ -93,14 +93,14 @@ func (bc *blockchain) Prepare(ctx context.Context, number uint64) {
 }
 
 // ProcessTransaction processes the given transaction and returns the receipt.
-func (bc *blockchain) ProcessTransaction(ctx context.Context, tx *types.Transaction) (*ExecutionResult, error) {
+func (bc *blockchain) ProcessTransaction(ctx context.Context, tx *types.Transaction, isReservedSender bool) (*ExecutionResult, error) {
 	bc.logger.Debug("processing evm transaction", "tx_hash", tx.Hash())
 
 	// Reset the Gas and State plugins for the tx.
 	bc.gp.Reset(ctx) // TODO: may not need this.
 	bc.sp.Reset(ctx)
 
-	return bc.processor.ProcessTransaction(ctx, tx)
+	return bc.processor.ProcessTransaction(ctx, tx, isReservedSender)
 }
 
 // Finalize finalizes the current block.
