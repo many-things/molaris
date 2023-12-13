@@ -22,6 +22,7 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"math/big"
 	"pkg.berachain.dev/polaris/eth/core"
@@ -76,6 +77,13 @@ func (k *Keeper) processTransaction(ctx context.Context, tx *coretypes.Transacti
 			"tx_hash", tx.Hash(),
 			"gas_consumed", sCtx.GasMeter().GasConsumed(),
 		)
+	}
+
+	if execResult.UsedGas != sCtx.GasMeter().GasConsumed() {
+		panic(fmt.Sprintf(
+			"[**********] result gas used and ctx gas used differ. result: %d, ctx: %d",
+			execResult.UsedGas, sCtx.GasMeter().GasConsumed(),
+		))
 	}
 
 	// Return the execution result.
